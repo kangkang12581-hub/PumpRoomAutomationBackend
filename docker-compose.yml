@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pumproom-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Database=pumproom_automation;Username=pumproom_user;Password=pumproom_password
+      - JwtSettings__Secret=your-super-secret-jwt-key-change-this-in-production-must-be-at-least-32-characters
+    depends_on:
+      - db
+    networks:
+      - pumproom-network
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: pumproom-db
+    environment:
+      - POSTGRES_DB=pumproom_automation
+      - POSTGRES_USER=pumproom_user
+      - POSTGRES_PASSWORD=pumproom_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - pumproom-network
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+
+networks:
+  pumproom-network:
+    driver: bridge
+
