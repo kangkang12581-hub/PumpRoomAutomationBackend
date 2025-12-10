@@ -9,7 +9,7 @@ namespace PumpRoomAutomationBackend.Services.OpcUa;
 /// 站点专用 OPC UA 客户端
 /// Site-specific OPC UA Client
 /// </summary>
-public class SiteOpcUaClient : IDisposable
+public class SiteOpcUaClient : IOpcUaClient, IDisposable
 {
     private readonly ILogger<SiteOpcUaClient> _logger;
     private readonly SiteOpcUaConnection _config;
@@ -258,6 +258,83 @@ public class SiteOpcUaClient : IDisposable
                 _config.SiteCode, nodeId);
             return new StatusCode(Opc.Ua.StatusCodes.BadUnexpectedError);
         }
+    }
+    
+    /// <summary>
+    /// 浏览节点
+    /// </summary>
+    public Task<IEnumerable<NodeInfo>> BrowseNodesAsync(string? nodeId = null)
+    {
+        if (_session == null || !_session.Connected)
+        {
+            _logger.LogWarning("⚠️ [{SiteCode}] 会话未连接，无法浏览节点", _config.SiteCode);
+            return Task.FromResult<IEnumerable<NodeInfo>>(new List<NodeInfo>());
+        }
+        
+        try
+        {
+            var node = string.IsNullOrWhiteSpace(nodeId)
+                ? _session.NodeCache.Find(Objects.ObjectsFolder)
+                : _session.NodeCache.Find(nodeId);
+            
+            if (node == null)
+                return Task.FromResult<IEnumerable<NodeInfo>>(new List<NodeInfo>());
+            
+            var result = new List<NodeInfo>();
+            
+            var browseDescription = new BrowseDescription
+            {
+                NodeId = (NodeId)node.NodeId,
+                BrowseDirection = BrowseDirection.Forward,
+                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                IncludeSubtypes = true,
+                NodeClassMask = 0,
+                ResultMask = (uint)BrowseResultMask.All
+            };
+            
+            var browseCollection = new BrowseDescriptionCollection { browseDescription };
+            _session.Browse(null, null, 0, browseCollection, out BrowseResultCollection browseResults, out _);
+            
+            if (browseResults.Count > 0 && browseResults[0].References != null)
+            {
+                foreach (var reference in browseResults[0].References)
+                {
+                    try
+                    {
+                        var nodeInfo = new NodeInfo
+                        {
+                            NodeId = reference.NodeId.ToString(),
+                            BrowseName = reference.BrowseName.Name,
+                            DisplayName = reference.DisplayName.Text,
+                            NodeClass = reference.NodeClass,
+                            HasValue = reference.NodeClass == NodeClass.Variable
+                        };
+                        result.Add(nodeInfo);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "⚠️ [{SiteCode}] 获取子节点信息失败", _config.SiteCode);
+                    }
+                }
+            }
+            
+            return Task.FromResult<IEnumerable<NodeInfo>>(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "⚠️ [{SiteCode}] 浏览节点失败: {NodeId}", _config.SiteCode, nodeId ?? "Root");
+            return Task.FromResult<IEnumerable<NodeInfo>>(new List<NodeInfo>());
+        }
+    }
+    
+    /// <summary>
+    /// 附加会话（用于兼容IOpcUaClient接口，但SiteOpcUaClient管理自己的会话）
+    /// </summary>
+    public void AttachSession(Session session)
+    {
+        // SiteOpcUaClient管理自己的会话，此方法仅用于接口兼容性
+        // 如果外部尝试附加会话，我们记录警告但不执行操作
+        _logger.LogWarning("⚠️ [{SiteCode}] AttachSession被调用，但SiteOpcUaClient管理自己的会话，忽略此调用", _config.SiteCode);
     }
     
     /// <summary>
