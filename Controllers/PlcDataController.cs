@@ -85,8 +85,17 @@ public class PlcDataController : ControllerBase
                 return BadRequest(ApiResponse<NodeDataResponse>.Fail("节点ID不能为空", "INVALID_NODEID"));
             }
             
-            var siteCode = await GetDefaultSiteCodeAsync();
-            _logger.LogInformation("🏢 使用默认站点: {SiteCode}", siteCode);
+            string? siteCode = null;
+            try
+            {
+                siteCode = await GetDefaultSiteCodeAsync();
+                _logger.LogInformation("🏢 使用默认站点: {SiteCode}", siteCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "获取默认站点失败");
+                return BadRequest(ApiResponse<NodeDataResponse>.Fail("获取站点失败", "GET_SITE_FAILED"));
+            }
             
             if (siteCode == null)
             {
@@ -94,7 +103,17 @@ public class PlcDataController : ControllerBase
                 return NotFound(ApiResponse<NodeDataResponse>.Fail("没有可用的站点", "NO_SITE_AVAILABLE"));
             }
             
-            var client = _connectionManager.GetClient(siteCode);
+            IOpcUaClient? client = null;
+            try
+            {
+                client = _connectionManager.GetClient(siteCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "获取客户端失败: {SiteCode}", siteCode);
+                return BadRequest(ApiResponse<NodeDataResponse>.Fail("获取客户端失败", "GET_CLIENT_FAILED"));
+            }
+            
             if (client == null)
             {
                 _logger.LogWarning("❌ 站点 {SiteCode} 的客户端不存在", siteCode);
@@ -110,11 +129,21 @@ public class PlcDataController : ControllerBase
             }
             
             _logger.LogInformation("📖 开始读取节点: {NodeId}", nodeId);
-            var dataValue = await client.ReadValueAsync(nodeId);
+            
+            Opc.Ua.DataValue? dataValue = null;
+            try
+            {
+                dataValue = await client.ReadValueAsync(nodeId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "读取节点异常: {NodeId}", nodeId);
+                return BadRequest(ApiResponse<NodeDataResponse>.Fail($"读取节点失败: {ex.Message}", "READ_EXCEPTION"));
+            }
             
             if (dataValue == null)
             {
-                _logger.LogWarning("❌ 读取节点失败: {NodeId}", nodeId);
+                _logger.LogWarning("❌ 读取节点失败: {NodeId} - 返回值为空", nodeId);
                 return NotFound(ApiResponse<NodeDataResponse>.Fail("读取节点失败", "READ_FAILED"));
             }
             
@@ -133,8 +162,8 @@ public class PlcDataController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "读取节点失败: {NodeId}", nodeId);
-            return StatusCode(500, ApiResponse<NodeDataResponse>.Fail("读取节点失败", "INTERNAL_ERROR"));
+            _logger.LogError(ex, "读取节点失败: {NodeId} - 未预期的异常", nodeId);
+            return BadRequest(ApiResponse<NodeDataResponse>.Fail($"读取节点失败: {ex.Message}", "INTERNAL_ERROR"));
         }
     }
     
@@ -211,8 +240,17 @@ public class PlcDataController : ControllerBase
         
         try
         {
-            var siteCode = await GetDefaultSiteCodeAsync();
-            _logger.LogInformation("🏢 使用默认站点: {SiteCode}", siteCode);
+            string? siteCode = null;
+            try
+            {
+                siteCode = await GetDefaultSiteCodeAsync();
+                _logger.LogInformation("🏢 使用默认站点: {SiteCode}", siteCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "获取默认站点失败");
+                return Ok(ApiResponse<object>.Ok(new { isRemote = false, mode = "local", available = false }, "获取站点失败"));
+            }
             
             if (siteCode == null)
             {
@@ -220,10 +258,20 @@ public class PlcDataController : ControllerBase
                 return Ok(ApiResponse<object>.Ok(new { isRemote = false, mode = "local", available = false }, "站点不可用"));
             }
             
-            var client = _connectionManager.GetClient(siteCode);
+            IOpcUaClient? client = null;
+            try
+            {
+                client = _connectionManager.GetClient(siteCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "获取客户端失败: {SiteCode}", siteCode);
+                return Ok(ApiResponse<object>.Ok(new { isRemote = false, mode = "local", available = false }, "获取客户端失败"));
+            }
+            
             if (client == null || !client.IsConnected)
             {
-                _logger.LogWarning("❌ 站点未连接");
+                _logger.LogWarning("❌ 站点未连接: {SiteCode}", siteCode);
                 return Ok(ApiResponse<object>.Ok(new { isRemote = false, mode = "local", available = false }, "站点未连接"));
             }
             
@@ -232,15 +280,35 @@ public class PlcDataController : ControllerBase
             var nodeId = "ns=4;s=|var|Inovance-ARM-Linux.Application.GVL_HMI.GHb_localRem";
             
             _logger.LogInformation("📖 读取工作模式节点: {NodeId}", nodeId);
-            var dataValue = await client.ReadValueAsync(nodeId);
+            
+            Opc.Ua.DataValue? dataValue = null;
+            try
+            {
+                dataValue = await client.ReadValueAsync(nodeId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "读取工作模式节点失败: {NodeId}", nodeId);
+                return Ok(ApiResponse<object>.Ok(new { isRemote = false, mode = "local", available = false }, "读取节点失败"));
+            }
             
             if (dataValue == null || dataValue.Value == null)
             {
-                _logger.LogWarning("❌ 读取工作模式节点失败");
+                _logger.LogWarning("❌ 读取工作模式节点失败: 返回值为空");
                 return Ok(ApiResponse<object>.Ok(new { isRemote = false, mode = "local", available = false }, "读取失败"));
             }
             
-            bool isRemote = Convert.ToBoolean(dataValue.Value);
+            bool isRemote = false;
+            try
+            {
+                isRemote = Convert.ToBoolean(dataValue.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "转换工作模式值失败: {Value}", dataValue.Value);
+                return Ok(ApiResponse<object>.Ok(new { isRemote = false, mode = "local", available = false }, "数据格式错误"));
+            }
+            
             string mode = isRemote ? "remote" : "local";
             
             _logger.LogInformation("✅ 工作模式读取成功: {Mode} (isRemote={IsRemote})", mode, isRemote);
@@ -257,7 +325,7 @@ public class PlcDataController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "获取工作模式失败");
+            _logger.LogError(ex, "获取工作模式失败: 未预期的异常");
             return Ok(ApiResponse<object>.Ok(new { isRemote = false, mode = "local", available = false }, "获取失败"));
         }
     }
