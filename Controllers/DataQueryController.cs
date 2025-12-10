@@ -65,7 +65,8 @@ public class DataQueryController : ControllerBase
             else if (!string.IsNullOrEmpty(timeRange))
             {
                 var now = DateTime.UtcNow;
-                endTime = now;
+                // 将结束时间设置为下一分钟，确保包含当前分钟的数据
+                endTime = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0, DateTimeKind.Utc).AddMinutes(1);
 
                 startTime = timeRange.ToLower() switch
                 {
@@ -76,6 +77,9 @@ public class DataQueryController : ControllerBase
                     "30d" => now.AddDays(-30),
                     _ => throw new ArgumentException($"不支持的时间范围: {timeRange}")
                 };
+                
+                _logger.LogInformation("查询时间范围: Metric={Metric}, SiteId={SiteId}, StartTime={StartTime}, EndTime={EndTime}, TimeRange={TimeRange}",
+                    metric, siteId, startTime, endTime, timeRange);
             }
             else
             {
@@ -91,7 +95,7 @@ public class DataQueryController : ControllerBase
                 FROM {tableName}
                 WHERE site_id = @p0
                     AND timestamp >= @p1
-                    AND timestamp < @p2
+                    AND timestamp <= @p2
                 ORDER BY timestamp DESC
                 LIMIT @p3
             ";
@@ -110,11 +114,13 @@ public class DataQueryController : ControllerBase
                 var param2 = command.CreateParameter();
                 param2.ParameterName = "@p1";
                 param2.Value = startTime;
+                param2.DbType = System.Data.DbType.DateTime;
                 command.Parameters.Add(param2);
                 
                 var param3 = command.CreateParameter();
                 param3.ParameterName = "@p2";
                 param3.Value = endTime;
+                param3.DbType = System.Data.DbType.DateTime;
                 command.Parameters.Add(param3);
                 
                 var param4 = command.CreateParameter();
@@ -139,6 +145,9 @@ public class DataQueryController : ControllerBase
                     }
                 }
             }
+
+            _logger.LogInformation("查询结果: Metric={Metric}, SiteId={SiteId}, 找到 {Count} 条数据", 
+                metric, siteId, dataList.Count);
 
             return Ok(new
             {
