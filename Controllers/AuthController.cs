@@ -164,6 +164,62 @@ public class AuthController : ControllerBase
     }
     
     /// <summary>
+    /// 刷新访问令牌
+    /// Refresh Access Token
+    /// </summary>
+    [HttpPost("refresh")]
+    [Authorize]
+    public async Task<ActionResult<ApiResponse<LoginResponse>>> RefreshToken()
+    {
+        try
+        {
+            var username = User.Identity?.Name;
+            if (string.IsNullOrEmpty(username))
+            {
+                _logger.LogWarning("刷新token失败 - 无法获取用户名");
+                return Unauthorized(ApiResponse<LoginResponse>.Fail("未授权", "UNAUTHORIZED"));
+            }
+            
+            var user = await _authService.GetUserByUsernameAsync(username);
+            if (user == null)
+            {
+                _logger.LogWarning("刷新token失败 - 用户不存在: {Username}", username);
+                return NotFound(ApiResponse<LoginResponse>.Fail("用户不存在", "USER_NOT_FOUND"));
+            }
+            
+            // 检查用户状态
+            if (!user.IsActive || user.Status != Models.Enums.UserStatus.ACTIVE)
+            {
+                _logger.LogWarning("刷新token失败 - 用户状态异常: {Username}", username);
+                return Unauthorized(ApiResponse<LoginResponse>.Fail("用户账户已被禁用", "USER_DISABLED"));
+            }
+            
+            // 生成新Token
+            var newToken = _authService.GenerateToken(user);
+            
+            // 获取用户完整信息
+            var userDto = await _userService.GetUserByIdAsync(user.Id);
+            
+            var response = new LoginResponse
+            {
+                AccessToken = newToken,
+                TokenType = "bearer",
+                ExpiresIn = _jwtSettings.AccessTokenExpirationMinutes * 60,
+                User = userDto!
+            };
+            
+            _logger.LogInformation("用户 {Username} token刷新成功", username);
+            
+            return Ok(ApiResponse<LoginResponse>.Ok(response, "Token刷新成功"));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "刷新token时发生错误: {Message}", ex.Message);
+            return StatusCode(500, ApiResponse<LoginResponse>.Fail("刷新token失败，请稍后重试", "INTERNAL_ERROR"));
+        }
+    }
+    
+    /// <summary>
     /// 获取当前用户信息
     /// Get Current User Info
     /// </summary>
