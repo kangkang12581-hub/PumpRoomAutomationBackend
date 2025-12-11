@@ -600,16 +600,13 @@ public class PlcDataController : ControllerBase
             var typeLower = type.ToLower();
             var valueType = value.GetType().Name;
             
-            // 如果值已经是目标类型，直接返回
-            if (typeLower == "boolean" || typeLower == "bool")
+            // 处理 JsonElement（System.Text.Json 反序列化时可能产生）
+            if (value is JsonElement jsonElement)
             {
-                if (value is bool boolValue)
-                    return boolValue;
-                
-                // 处理 JsonElement（System.Text.Json 反序列化时可能产生）
-                if (value is JsonElement jsonElement)
+                try
                 {
-                    try
+                    // Boolean 类型需要特殊处理
+                    if (typeLower == "boolean" || typeLower == "bool")
                     {
                         if (jsonElement.ValueKind == JsonValueKind.True)
                             return true;
@@ -627,12 +624,39 @@ public class PlcDataController : ControllerBase
                             if (str?.Equals("0", StringComparison.OrdinalIgnoreCase) == true)
                                 return false;
                         }
+                        // 如果无法从 JsonElement 转换，继续到下面的 Boolean 处理
                     }
-                    catch
+                    else
                     {
-                        // 如果JsonElement转换失败，继续尝试其他方法
+                        // 非 Boolean 类型的 JsonElement 处理
+                        return typeLower switch
+                        {
+                            "int16" or "short" => jsonElement.GetInt16(),
+                            "int32" or "int" => jsonElement.GetInt32(),
+                            "int64" or "long" => jsonElement.GetInt64(),
+                            "uint16" or "ushort" => jsonElement.GetUInt16(),
+                            "uint32" or "uint" => jsonElement.GetUInt32(),
+                            "uint64" or "ulong" => jsonElement.GetUInt64(),
+                            "float" or "single" => jsonElement.GetSingle(),
+                            "double" => jsonElement.GetDouble(),
+                            "string" => jsonElement.GetString() ?? string.Empty,
+                            _ => jsonElement.ValueKind == JsonValueKind.Number 
+                                ? jsonElement.GetDouble() 
+                                : jsonElement.GetString() ?? value
+                        };
                     }
                 }
+                catch
+                {
+                    // 如果JsonElement转换失败，继续尝试其他方法
+                }
+            }
+            
+            // 如果值已经是目标类型，直接返回
+            if (typeLower == "boolean" || typeLower == "bool")
+            {
+                if (value is bool boolValue)
+                    return boolValue;
                 
                 // 处理字符串 "true"/"false"
                 if (value is string strValue)
